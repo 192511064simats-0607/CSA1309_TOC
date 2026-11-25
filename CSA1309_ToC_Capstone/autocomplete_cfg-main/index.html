@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C CFG Autocomplete Engine — Live Earley Parser</title>
+<meta name="description" content="An intelligent Context-Free Grammar powered C code autocompletion engine using the Earley parsing algorithm. Real-time C syntax analysis, tokenization, and live chart visualization.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════════════════════ */
+:root {
+  --bg:          #0b0f1a;
+  --bg-2:        #0f1422;
+  --surface:     #141927;
+  --surface-2:   #1a2035;
+  --surface-3:   #1e2740;
+  --border:      rgba(255,255,255,0.07);
+  --border-2:    rgba(255,255,255,0.12);
+
+  --text:        #e8e6f0;
+  --text-2:      #9da4b8;
+  --text-3:      #636b82;
+
+  --violet:      #a78bfa;
+  --violet-glow: rgba(167,139,250,0.15);
+  --teal:        #2dd4bf;
+  --teal-glow:   rgba(45,212,191,0.12);
+  --amber:       #fbbf24;
+  --amber-glow:  rgba(251,191,36,0.12);
+  --red:         #f87171;
+  --red-glow:    rgba(248,113,113,0.12);
+  --pink:        #f472b6;
+  --green:       #4ade80;
+  --blue:        #60a5fa;
+
+  --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+  --sans: "Inter", system-ui, -apple-system, sans-serif;
+
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 48px rgba(0,0,0,0.6);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.6;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 10%, rgba(167,139,250,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(45,212,191,0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 60% at 50% 50%, rgba(96,165,250,0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app {
+  position: relative;
+  z-index: 1;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 36px 24px 80px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════════════════ */
+.header {
+  text-align: center;
+  margin-bottom: 36px;
+  animation: fadeSlideDown 0.6s ease both;
+}
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--violet-glow);
+  border: 1px solid rgba(167,139,250,0.3);
+  border-radius: 100px;
+  padding: 6px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--violet);
+  margin-bottom: 16px;
+}
+.header-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); animation: pulse 2s infinite; }
+h1 {
+  font-size: clamp(26px, 4.5vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text) 0%, var(--violet) 50%, var(--teal) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 12px;
+}
+.header-sub {
+  font-size: 14.5px;
+  color: var(--text-2);
+  max-width: 620px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+.header-tags {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.tag {
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 3px 10px;
+  border-radius: 100px;
+  border: 1px solid var(--border-2);
+  color: var(--text-3);
+  background: var(--surface);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GRID LAYOUT
+═══════════════════════════════════════════════════════════════ */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  animation: fadeSlideUp 0.6s 0.15s ease both;
+}
+@media (max-width: 900px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PANELS / CARDS
+═══════════════════════════════════════════════════════════════ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--border-2); }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+.card-title {
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.card-body { padding: 16px 18px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   CODE EDITOR
+═══════════════════════════════════════════════════════════════ */
+.editor-wrap { position: relative; }
+.editor-chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+}
+.chrome-dot { width: 10px; height: 10px; border-radius: 50%; }
+.chrome-dot:nth-child(1) { background: #ff5f56; }
+.chrome-dot:nth-child(2) { background: #ffbd2e; }
+.chrome-dot:nth-child(3) { background: #27c93f; }
+.chrome-label {
+  margin-left: 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-3);
+}
+.editor-inner {
+  position: relative;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+#codeInput {
+  width: 100%;
+  min-height: 150px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14.5px;
+  line-height: 1.65;
+  padding: 16px 18px;
+  resize: vertical;
+  outline: none;
+  caret-color: var(--teal);
+  tab-size: 4;
+}
+#codeInput::selection { background: rgba(167,139,250,0.25); }
+.editor-inner:focus-within {
+  border-color: rgba(45,212,191,0.4);
+  box-shadow: 0 0 0 3px rgba(45,212,191,0.08);
+}
+
+/* Autocomplete Dropdown */
+.autocomplete-dropdown {
+  position: absolute;
+  left: 18px;
+  top: calc(100% + 4px);
+  width: calc(100% - 36px);
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface-3);
+  border: 1px solid rgba(45,212,191,0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  display: none;
+  animation: dropIn 0.15s ease both;
+}
+.autocomplete-dropdown.open { display: block; }
+.ac-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: rgba(45,212,191,0.12); }
+.ac-icon {
+  width: 28px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+.ac-icon.type       { background: rgba(96,165,250,0.2); color: var(--blue); }
+.ac-icon.keyword    { background: rgba(167,139,250,0.2); color: var(--violet); }
+.ac-icon.operator   { background: rgba(251,191,36,0.15); color: var(--amber); }
+.ac-icon.identifier { background: rgba(45,212,191,0.15); color: var(--teal); }
+.ac-icon.literal    { background: rgba(244,114,182,0.15); color: var(--pink); }
+.ac-icon.delimiter  { background: rgba(255,255,255,0.08); color: var(--text-2); }
+.ac-icon.other      { background: rgba(255,255,255,0.06); color: var(--text-3); }
+
+.ac-text { font-family: var(--mono); font-size: 13px; color: var(--text); flex: 1; }
+.ac-match { color: var(--teal); font-weight: 700; }
+.ac-origin {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-3);
+  font-family: var(--mono);
+}
+.ac-cat { font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+
+/* ═══════════════════════════════════════════════════════════════
+   STATUS BAR & DIAGNOSTICS
+═══════════════════════════════════════════════════════════════ */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.2);
+  flex-wrap: wrap;
+}
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.status-dot.valid       { background: var(--green);  box-shadow: 0 0 8px var(--green); }
+.status-dot.incomplete  { background: var(--teal);   box-shadow: 0 0 8px var(--teal); }
+.status-dot.recovered   { background: var(--amber);  box-shadow: 0 0 8px var(--amber); }
+.status-dot.invalid     { background: var(--red);    box-shadow: 0 0 8px var(--red); }
+
+.status-text.valid      { color: var(--green); }
+.status-text.incomplete { color: var(--teal); }
+.status-text.recovered  { color: var(--amber); }
+.status-text.invalid    { color: var(--red); }
+
+.stat-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.stat-pill strong { color: var(--text-2); }
+
+.diag-alert {
+  margin: 12px 18px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  display: none;
+  line-height: 1.5;
+}
+.diag-alert.visible { display: block; }
+.diag-alert.err { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
+.diag-alert.warn { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: var(--amber); }
+
+/* ═══════════════════════════════════════════════════════════════
+   SUGGESTIONS CHIPS & LEGEND
+═══════════════════════════════════════════════════════════════ */
+.chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  animation: chipIn 0.2s ease both;
+}
+.chip:hover { transform: translateY(-1px); }
+.chip.type       { background: rgba(96,165,250,0.1); color: var(--blue); border-color: rgba(96,165,250,0.3); }
+.chip.type:hover { background: rgba(96,165,250,0.2); }
+.chip.keyword    { background: rgba(167,139,250,0.1); color: var(--violet); border-color: rgba(167,139,250,0.3); }
+.chip.keyword:hover { background: rgba(167,139,250,0.2); }
+.chip.operator   { background: rgba(251,191,36,0.1); color: var(--amber); border-color: rgba(251,191,36,0.3); }
+.chip.operator:hover { background: rgba(251,191,36,0.2); }
+.chip.identifier { background: rgba(45,212,191,0.1); color: var(--teal); border-color: rgba(45,212,191,0.3); }
+.chip.identifier:hover { background: rgba(45,212,191,0.2); }
+.chip.literal    { background: rgba(244,114,182,0.1); color: var(--pink); border-color: rgba(244,114,182,0.3); }
+.chip.literal:hover { background: rgba(244,114,182,0.2); }
+.chip.delimiter  { background: var(--surface-2); color: var(--text-2); border-color: var(--border-2); }
+.chip.delimiter:hover { border-color: var(--text-2); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
+.legend-swatch { width: 9px; height: 9px; border-radius: 2px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOKEN STREAM VISUALISER
+═══════════════════════════════════════════════════════════════ */
+.token-stream { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.tok {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  cursor: default;
+}
+.tok-raw  { font-weight: 600; }
+.tok-type { font-size: 8.5px; opacity: 0.7; letter-spacing: 0.05em; }
+.tok.t-type       { background: rgba(96,165,250,0.1); color: var(--blue); border-color: rgba(96,165,250,0.25); }
+.tok.t-keyword    { background: rgba(167,139,250,0.1); color: var(--violet); border-color: rgba(167,139,250,0.25); }
+.tok.t-id         { background: rgba(45,212,191,0.08); color: var(--teal); border-color: rgba(45,212,191,0.2); }
+.tok.t-num        { background: rgba(244,114,182,0.08); color: var(--pink); border-color: rgba(244,114,182,0.2); }
+.tok.t-str        { background: rgba(74,222,128,0.08); color: var(--green); border-color: rgba(74,222,128,0.2); }
+.tok.t-char       { background: rgba(74,222,128,0.1); color: var(--green); border-color: rgba(74,222,128,0.25); }
+.tok.t-op         { background: rgba(251,191,36,0.08); color: var(--amber); border-color: rgba(251,191,36,0.2); }
+.tok.t-delim      { background: rgba(255,255,255,0.05); color: var(--text-2); border-color: var(--border); }
+
+/* ═══════════════════════════════════════════════════════════════
+   EARLEY CHART VISUALISER
+═══════════════════════════════════════════════════════════════ */
+.chart-columns { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
+.chart-col-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-width: 58px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chart-col-card:hover, .chart-col-card.active { border-color: rgba(45,212,191,0.5); background: var(--teal-glow); }
+.chart-col-card.last-col { border-color: rgba(167,139,250,0.4); background: var(--violet-glow); }
+.chart-col-idx { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-bottom: 2px; }
+.chart-col-count { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--text); }
+.chart-col-label { font-size: 9px; color: var(--text-3); margin-top: 1px; }
+
+.state-list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.state-list::-webkit-scrollbar { width: 6px; }
+.state-list::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+
+.state-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  transition: background 0.1s;
+  border: 1px solid transparent;
+}
+.state-item:hover { background: var(--surface-3); }
+.state-item.complete { border-color: rgba(45,212,191,0.2); background: rgba(45,212,191,0.03); }
+.state-item.has-terminal { border-color: rgba(251,191,36,0.15); background: rgba(251,191,36,0.03); }
+.state-lhs { color: var(--violet); font-weight: 600; }
+.state-arrow { color: var(--text-3); }
+.state-sym { color: var(--text-2); }
+.state-sym.matched { color: var(--text-3); text-decoration: line-through; opacity: 0.5; }
+.state-cursor { color: var(--teal); font-weight: 700; margin: 0 1px; }
+.state-badge {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(45,212,191,0.15);
+  color: var(--teal);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SIDEBAR & EXAMPLES
+═══════════════════════════════════════════════════════════════ */
+.sidebar { display: flex; flex-direction: column; gap: 16px; }
+.examples-grid { display: flex; flex-direction: column; gap: 6px; }
+.ex-btn {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.ex-btn:hover { border-color: var(--border-2); color: var(--text); background: var(--surface-3); }
+.ex-btn span { display: block; font-size: 10px; color: var(--text-3); margin-top: 2px; font-family: var(--sans); }
+
+.grammar-search {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  outline: none;
+  margin-bottom: 12px;
+}
+.grammar-search:focus { border-color: rgba(45,212,191,0.4); }
+
+.grammar-rules { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.grammar-rules::-webkit-scrollbar { width: 6px; }
+.grammar-rules::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+.rule-row {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rule-row:hover { background: var(--surface-2); }
+.rule-lhs { color: var(--violet); font-weight: 600; white-space: nowrap; }
+.rule-arr { color: var(--text-3); }
+.rule-rhs { color: var(--text-2); }
+.rule-rhs .nt { color: var(--blue); }
+.rule-rhs .kw { color: var(--amber); }
+
+.footer {
+  text-align: center;
+  margin-top: 48px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.footer a { color: var(--teal); text-decoration: none; }
+
+@keyframes fadeSlideDown { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeSlideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes chipIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@keyframes dropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── HEADER ─────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-badge">
+      <span class="dot"></span>
+      C Language · Theory of Computation
+    </div>
+    <h1>CFG-Based C Autocomplete Engine</h1>
+    <p class="header-sub">
+      Grammar-driven C code autocompletion powered by the Earley parsing algorithm.
+      Synchronized context analysis across C types, declarations, statements, expressions, and scopes.
+    </p>
+    <div class="header-tags">
+      <span class="tag">C Grammar CFG</span>
+      <span class="tag">Earley Algorithm</span>
+      <span class="tag">Scope & Symbol Table</span>
+      <span class="tag">Syntax Error Diagnostics</span>
+    </div>
+  </header>
+
+  <!-- ── MAIN GRID ──────────────────────────────────────────────────── -->
+  <div class="main-grid">
+
+    <!-- ══ LEFT COLUMN ═══════════════════════════════════════════════ -->
+    <div class="left-col">
+
+      <!-- Editor card -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <span class="card-title">C Source Editor</span>
+          <button id="clearBtn" style="font-size:11px;font-family:var(--mono);background:none;border:1px solid var(--border);color:var(--text-3);padding:3px 10px;border-radius:4px;cursor:pointer;">Clear</button>
+        </div>
+        <div class="card-body" style="padding-bottom:0">
+          <div class="editor-wrap">
+            <div class="editor-chrome">
+              <div class="chrome-dot"></div>
+              <div class="chrome-dot"></div>
+              <div class="chrome-dot"></div>
+              <span class="chrome-label">main.c</span>
+            </div>
+            <div class="editor-inner">
+              <textarea id="codeInput" spellcheck="false" autocomplete="off"
+                        placeholder="Type C code here… e.g. int main() {&#10;Try: if ( a > 0 ) {&#10;     for ( int i = 0 ; i < 10 ; i++ ) {"
+              >int main() {</textarea>
+              <div class="autocomplete-dropdown" id="acDropdown"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Diagnostics Alert -->
+        <div class="diag-alert" id="diagAlert"></div>
+
+        <!-- Status bar -->
+        <div class="status-bar" id="statusBar">
+          <div class="status-indicator">
+            <div class="status-dot incomplete" id="statusDot"></div>
+            <span class="status-text incomplete" id="statusText">Analysing…</span>
+          </div>
+          <div class="stat-pill">Tokens: <strong id="statTokens">0</strong></div>
+          <div class="stat-pill">States: <strong id="statStates">0</strong></div>
+          <div class="stat-pill">Parse: <strong id="statTime">0 ms</strong></div>
+          <div class="stat-pill" style="margin-left:auto">Line: <strong id="statLine">1</strong> Col: <strong id="statCol">1</strong></div>
+        </div>
+      </div>
+
+      <!-- Suggestions card -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title">Grammar Legal Continuations</span></div>
+        <div class="card-body">
+          <div class="legend">
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(96,165,250,0.8)"></div> Type</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(167,139,250,0.8)"></div> Keyword</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(45,212,191,0.8)"></div> Identifier</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(244,114,182,0.8)"></div> Literal</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(251,191,36,0.8)"></div> Operator</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:rgba(255,255,255,0.4)"></div> Delimiter</div>
+          </div>
+          <div class="chips-row" id="chipsRow">
+            <span class="empty-msg">Awaiting input…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token Stream card -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><span class="card-title">Token Stream</span></div>
+        <div class="card-body">
+          <div class="token-stream" id="tokenStream">
+            <span class="empty-msg">No tokens yet</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Earley Chart card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Earley Chart Inspection</span>
+          <span style="font-size:11px;font-family:var(--mono);color:var(--text-3)" id="chartHint">Click any column to view active states</span>
+        </div>
+        <div class="card-body">
+          <div class="chart-columns" id="chartColumns"></div>
+          <div class="state-list" id="stateList"></div>
+        </div>
+      </div>
+
+    </div><!-- /left-col -->
+
+    <!-- ══ SIDEBAR ════════════════════════════════════════════════════ -->
+    <aside class="sidebar">
+
+      <!-- Examples card -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">C Code Test Cases</span></div>
+        <div class="card-body">
+          <div class="examples-grid" id="examplesGrid"></div>
+        </div>
+      </div>
+
+      <!-- Grammar reference card -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">C Grammar Rules</span>
+          <span style="font-size:10px;font-family:var(--mono);color:var(--text-3)" id="ruleCountBadge"></span>
+        </div>
+        <div class="card-body">
+          <input class="grammar-search" type="text" id="grammarSearch" placeholder="Filter C grammar rules…" autocomplete="off">
+          <div class="grammar-rules" id="grammarRules"></div>
+        </div>
+      </div>
+
+    </aside>
+
+  </div><!-- /main-grid -->
+
+  <footer class="footer">
+    CFG-Based C Autocomplete Engine · Theory of Computation ·
+    Earley Parsing & Synchronized C Syntax Grammar
+  </footer>
+
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   C GRAMMAR RULES (Full Practical C Subset)
+═══════════════════════════════════════════════════════════════════════════ */
+const GRAMMAR_RULES = [
+  // Program / Declarations / Statements
+  ["PROGRAM", ["DECL_LIST"]],
+  ["DECL_LIST", ["DECL_ITEM", "DECL_LIST"]],
+  ["DECL_LIST", ["DECL_ITEM"]],
+  ["DECL_ITEM", ["FUNC_DEF"]],
+  ["DECL_ITEM", ["FUNC_DECL"]],
+  ["DECL_ITEM", ["STRUCT_DECL"]],
+  ["DECL_ITEM", ["STMT"]],
+
+  // Types
+  ["TYPE", ["BASIC_TYPE"]],
+  ["TYPE", ["STRUCT_TYPE"]],
+  ["BASIC_TYPE", ["int"]],
+  ["BASIC_TYPE", ["char"]],
+  ["BASIC_TYPE", ["float"]],
+  ["BASIC_TYPE", ["double"]],
+  ["BASIC_TYPE", ["void"]],
+  ["BASIC_TYPE", ["short"]],
+  ["BASIC_TYPE", ["long"]],
+  ["BASIC_TYPE", ["unsigned"]],
+  ["BASIC_TYPE", ["signed"]],
+  ["STRUCT_TYPE", ["struct", "ID"]],
+
+  // Variable Declarations
+  ["VAR_DECL", ["TYPE", "VAR_INIT_LIST", ";"]],
+  ["VAR_INIT_LIST", ["VAR_INIT_LIST", ",", "VAR_ITEM"]],
+  ["VAR_INIT_LIST", ["VAR_ITEM"]],
+  ["VAR_ITEM", ["ID"]],
+  ["VAR_ITEM", ["*", "ID"]],
+  ["VAR_ITEM", ["ID", "=", "EXPR"]],
+  ["VAR_ITEM", ["*", "ID", "=", "EXPR"]],
+  ["VAR_ITEM", ["ID", "[", "EXPR", "]"]],
+  ["VAR_ITEM", ["ID", "[", "]"]],
+  ["VAR_ITEM", ["ID", "[", "EXPR", "]", "=", "{", "ARGLIST", "}"]],
+  ["VAR_ITEM", ["ID", "[", "]", "=", "STR"]],
+
+  // Struct Declarations
+  ["STRUCT_DECL", ["struct", "ID", "{", "STRUCT_MEMBERS", "}", ";"]],
+  ["STRUCT_DECL", ["struct", "ID", "{", "STRUCT_MEMBERS", "}", "VAR_INIT_LIST", ";"]],
+  ["STRUCT_MEMBERS", ["STRUCT_MEMBER", "STRUCT_MEMBERS"]],
+  ["STRUCT_MEMBERS", ["STRUCT_MEMBER"]],
+  ["STRUCT_MEMBER", ["TYPE", "VAR_INIT_LIST", ";"]],
+
+  // Functions
+  ["FUNC_DECL", ["TYPE", "ID", "(", ")", ";"]],
+  ["FUNC_DECL", ["TYPE", "ID", "(", "PARAMS", ")", ";"]],
+  ["FUNC_DECL", ["TYPE", "*", "ID", "(", ")", ";"]],
+  ["FUNC_DECL", ["TYPE", "*", "ID", "(", "PARAMS", ")", ";"]],
+  ["FUNC_DEF", ["TYPE", "ID", "(", ")", "BLOCK"]],
+  ["FUNC_DEF", ["TYPE", "ID", "(", "PARAMS", ")", "BLOCK"]],
+  ["FUNC_DEF", ["TYPE", "*", "ID", "(", ")", "BLOCK"]],
+  ["FUNC_DEF", ["TYPE", "*", "ID", "(", "PARAMS", ")", "BLOCK"]],
+  ["PARAMS", ["PARAMS", ",", "PARAM"]],
+  ["PARAMS", ["PARAM"]],
+  ["PARAM", ["TYPE", "ID"]],
+  ["PARAM", ["TYPE", "*", "ID"]],
+  ["PARAM", ["TYPE"]],
+  ["PARAM", ["TYPE", "ID", "[", "]"]],
+  ["PARAM", ["TYPE", "ID", "[", "EXPR", "]"]],
+
+  // Statements
+  ["STMT", ["VAR_DECL"]],
+  ["STMT", ["EXPR_STMT"]],
+  ["STMT", ["IF"]],
+  ["STMT", ["WHILE"]],
+  ["STMT", ["DO_WHILE"]],
+  ["STMT", ["FOR"]],
+  ["STMT", ["SWITCH"]],
+  ["STMT", ["RETURN"]],
+  ["STMT", ["BREAK"]],
+  ["STMT", ["CONTINUE"]],
+  ["STMT", ["BLOCK"]],
+
+  ["BLOCK", ["{", "STMTS", "}"]],
+  ["BLOCK", ["{", "}"]],
+  ["STMTS", ["STMT", "STMTS"]],
+  ["STMTS", ["STMT"]],
+
+  ["EXPR_STMT", ["EXPR", ";"]],
+  ["EXPR_STMT", [";"]],
+
+  ["RETURN", ["return", "EXPR", ";"]],
+  ["RETURN", ["return", ";"]],
+  ["BREAK", ["break", ";"]],
+  ["CONTINUE", ["continue", ";"]],
+
+  // Control Flow
+  ["IF", ["if", "(", "COND", ")", "STMT"]],
+  ["IF", ["if", "(", "COND", ")", "STMT", "else", "STMT"]],
+  ["WHILE", ["while", "(", "COND", ")", "STMT"]],
+  ["DO_WHILE", ["do", "STMT", "while", "(", "COND", ")", ";"]],
+
+  ["FOR", ["for", "(", "FOR_INIT", ";", "FOR_COND", ";", "FOR_UPDATE", ")", "STMT"]],
+  ["FOR", ["for", "(", ";", "FOR_COND", ";", "FOR_UPDATE", ")", "STMT"]],
+  ["FOR", ["for", "(", "FOR_INIT", ";", ";", "FOR_UPDATE", ")", "STMT"]],
+  ["FOR", ["for", "(", "FOR_INIT", ";", "FOR_COND", ";", ")", "STMT"]],
+  ["FOR", ["for", "(", ";", ";", ")", "STMT"]],
+
+  ["FOR_INIT", ["TYPE", "VAR_INIT_LIST"]],
+  ["FOR_INIT", ["EXPR"]],
+  ["FOR_COND", ["COND"]],
+  ["FOR_UPDATE", ["EXPR"]],
+
+  ["SWITCH", ["switch", "(", "EXPR", ")", "{", "CASES", "}"]],
+  ["SWITCH", ["switch", "(", "EXPR", ")", "{", "}"]],
+  ["CASES", ["CASE_STMT", "CASES"]],
+  ["CASES", ["CASE_STMT"]],
+  ["CASE_STMT", ["case", "EXPR", ":", "STMTS"]],
+  ["CASE_STMT", ["case", "EXPR", ":"]],
+  ["CASE_STMT", ["default", ":", "STMTS"]],
+  ["CASE_STMT", ["default", ":"]],
+
+  // Condition & Expressions
+  ["COND", ["EXPR"]],
+  ["EXPR", ["ASSIGN_EXPR"]],
+  ["ASSIGN_EXPR", ["LVALUE", "ASSIGN_OP", "ASSIGN_EXPR"]],
+  ["ASSIGN_EXPR", ["BIN_EXPR"]],
+
+  ["ASSIGN_OP", ["="]],
+  ["ASSIGN_OP", ["+="]],
+  ["ASSIGN_OP", ["-="]],
+  ["ASSIGN_OP", ["*="]],
+  ["ASSIGN_OP", ["/="]],
+  ["ASSIGN_OP", ["%="]],
+  ["ASSIGN_OP", ["&="]],
+  ["ASSIGN_OP", ["|="]],
+  ["ASSIGN_OP", ["^="]],
+  ["ASSIGN_OP", ["<<="]],
+  ["ASSIGN_OP", [">>="]],
+
+  ["LVALUE", ["ID"]],
+  ["LVALUE", ["*", "ID"]],
+  ["LVALUE", ["POSTFIX", "[", "EXPR", "]"]],
+  ["LVALUE", ["POSTFIX", ".", "ID"]],
+  ["LVALUE", ["POSTFIX", "->", "ID"]],
+
+  ["BIN_EXPR", ["BIN_EXPR", "BIN_OP", "UNARY"]],
+  ["BIN_EXPR", ["UNARY"]],
+
+  ["BIN_OP", ["+"]],
+  ["BIN_OP", ["-"]],
+  ["BIN_OP", ["*"]],
+  ["BIN_OP", ["/"]],
+  ["BIN_OP", ["%"]],
+  ["BIN_OP", ["=="]],
+  ["BIN_OP", ["!="]],
+  ["BIN_OP", ["<"]],
+  ["BIN_OP", [">"]],
+  ["BIN_OP", ["<="]],
+  ["BIN_OP", [">="]],
+  ["BIN_OP", ["&&"]],
+  ["BIN_OP", ["||"]],
+  ["BIN_OP", ["&"]],
+  ["BIN_OP", ["|"]],
+  ["BIN_OP", ["^"]],
+  ["BIN_OP", ["<<"]],
+  ["BIN_OP", [">>"]],
+
+  ["UNARY", ["UNARY_OP", "UNARY"]],
+  ["UNARY", ["sizeof", "(", "TYPE", ")"]],
+  ["UNARY", ["sizeof", "(", "EXPR", ")"]],
+  ["UNARY", ["sizeof", "UNARY"]],
+  ["UNARY", ["POSTFIX"]],
+
+  ["UNARY_OP", ["+"]],
+  ["UNARY_OP", ["-"]],
+  ["UNARY_OP", ["!"]],
+  ["UNARY_OP", ["~"]],
+  ["UNARY_OP", ["*"]],
+  ["UNARY_OP", ["&"]],
+  ["UNARY_OP", ["++"]],
+  ["UNARY_OP", ["--"]],
+
+  ["POSTFIX", ["POSTFIX", "++"]],
+  ["POSTFIX", ["POSTFIX", "--"]],
+  ["POSTFIX", ["POSTFIX", "(", ")"]],
+  ["POSTFIX", ["POSTFIX", "(", "ARGLIST", ")"]],
+  ["POSTFIX", ["POSTFIX", "[", "EXPR", "]"]],
+  ["POSTFIX", ["POSTFIX", ".", "ID"]],
+  ["POSTFIX", ["POSTFIX", "->", "ID"]],
+  ["POSTFIX", ["PRIMARY"]],
+
+  ["PRIMARY", ["(", "EXPR", ")"]],
+  ["PRIMARY", ["ID"]],
+  ["PRIMARY", ["NUM"]],
+  ["PRIMARY", ["STR"]],
+  ["PRIMARY", ["CHAR"]],
+  ["PRIMARY", ["NULL"]],
+
+  ["ARGLIST", ["ARGLIST", ",", "EXPR"]],
+  ["ARGLIST", ["EXPR"]],
+];
+
+const START = "PROGRAM";
+
+const PRODUCTIONS = {};
+const NONTERMINALS = new Set(GRAMMAR_RULES.map(r => r[0]));
+for (const [lhs, rhs] of GRAMMAR_RULES) {
+  if (!PRODUCTIONS[lhs]) PRODUCTIONS[lhs] = [];
+  PRODUCTIONS[lhs].push(rhs);
+}
+function prodsFor(lhs) { return PRODUCTIONS[lhs] || []; }
+function isNT(sym)     { return NONTERMINALS.has(sym); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   C LEXICON & TOKENIZER
+═══════════════════════════════════════════════════════════════════════════ */
+const C_TYPES = new Set(["int", "char", "float", "double", "void", "short", "long", "unsigned", "signed", "struct"]);
+const C_CONTROLS = new Set(["if", "else", "while", "for", "do", "switch", "case", "default", "return", "break", "continue"]);
+const C_OTHERS = new Set(["sizeof", "NULL"]);
+const KEYWORDS = new Set([...C_TYPES, ...C_CONTROLS, ...C_OTHERS]);
+
+const C_STDLIB = ["printf", "scanf", "malloc", "free", "strlen", "strcpy", "strcmp", "sizeof", "exit", "fopen", "fclose"];
+
+function tokenize(text) {
+  const tokens = [];
+  // Token specification
+  const re = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fFlLuU]*)|([A-Za-z_][A-Za-z0-9_]*)|(->|<<=|>>=|\+\+|--|<=|>=|==|!=|&&|\|\||\+=|-=|\*=|\/=|%=|&=|\|=|\^=|<<|>>|[+\-*/%=(){}<>,;!&|^~:?\.\[\]])|(\n)|(\s+)|(.)/g;
+
+  let m;
+  let line = 1;
+  let col = 1;
+  let lineStart = 0;
+
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[0];
+    const start = m.index;
+    const curCol = start - lineStart + 1;
+
+    if (m[4] !== undefined) { // Newline
+      line++;
+      lineStart = re.lastIndex;
+      col = 1;
+      continue;
+    }
+    if (m[5] !== undefined || raw.startsWith("//") || raw.startsWith("/*") || raw.startsWith("#")) {
+      // Comments or whitespace
+      if (raw.includes("\n")) {
+        line += (raw.match(/\n/g) || []).length;
+        lineStart = start + raw.lastIndexOf("\n") + 1;
+      }
+      continue;
+    }
+
+    if (raw.startsWith('"')) {
+      tokens.push({symbol: "STR", raw, line, col: curCol});
+    } else if (raw.startsWith("'")) {
+      tokens.push({symbol: "CHAR", raw, line, col: curCol});
+    } else if (m[1] !== undefined) {
+      tokens.push({symbol: "NUM", raw, line, col: curCol});
+    } else if (m[2] !== undefined) {
+      tokens.push({symbol: KEYWORDS.has(raw) ? raw : "ID", raw, line, col: curCol});
+    } else if (m[3] !== undefined) {
+      tokens.push({symbol: raw, raw, line, col: curCol});
+    }
+  }
+  return tokens;
+}
+
+function splitPrefix(text) {
+  const m = text.match(/[A-Za-z_][A-Za-z0-9_]*$/);
+  if (m) return [text.slice(0, m.index), m[0]];
+  return [text, ""];
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SYMBOL TABLE EXTRACTION
+═══════════════════════════════════════════════════════════════════════════ */
+function extractSymbols(code) {
+  const vars = new Set();
+  const funcs = new Set();
+  const params = new Set();
+
+  const typePat = "\\b(?:int|char|float|double|void|short|long|unsigned|signed|struct\\s+[A-Za-z_][A-Za-z0-9_]*)\\b";
+
+  // Functions: type [*] name ( params )
+  const funcRe = new RegExp(typePat + "\\s*(?:\\*\\s*)?([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)", "g");
+  let fm;
+  while ((fm = funcRe.exec(code)) !== null) {
+    const fn = fm[1];
+    if (!KEYWORDS.has(fn)) funcs.add(fn);
+    const rawP = fm[2];
+    if (rawP) {
+      rawP.split(",").forEach(p => {
+        const pm = p.trim().match(/([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[.*\])?$/);
+        if (pm && !KEYWORDS.has(pm[1])) params.add(pm[1]);
+      });
+    }
+  }
+
+  // Variables: type [*] a, b = 5, c[10];
+  const varRe = new RegExp(typePat + "\\s+([^;{}]+);", "g");
+  let vm;
+  while ((vm = varRe.exec(code)) !== null) {
+    vm[1].split(",").forEach(item => {
+      const match = item.trim().match(/(?:\*\s*)?([A-Za-z_][A-Za-z0-9_]*)/);
+      if (match && !KEYWORDS.has(match[1])) vars.add(match[1]);
+    });
+  }
+
+  return {
+    variables: Array.from(vars),
+    functions: Array.from(funcs),
+    params: Array.from(params)
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DELIMITER BALANCE CHECKER
+═══════════════════════════════════════════════════════════════════════════ */
+function checkDelimiterBalance(text) {
+  const stack = [];
+  const pairs = {')': '(', '}': '{', ']': '['};
+  const errors = [];
+
+  const lines = text.split("\n");
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].replace(/\/\/.*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+    for (let ci = 0; ci < line.length; ci++) {
+      const ch = line[ci];
+      if ("({[".includes(ch)) {
+        stack.push({ch, line: li + 1, col: ci + 1});
+      } else if (")}]".includes(ch)) {
+        const expected = pairs[ch];
+        if (!stack.length) {
+          errors.push({type: "unmatched", msg: `Unmatched closing '${ch}' at Line ${li+1}, Col ${ci+1}`});
+        } else {
+          const top = stack.pop();
+          if (top.ch !== expected) {
+            errors.push({type: "mismatch", msg: `Mismatched closing '${ch}' at Line ${li+1}, Col ${ci+1} (opened with '${top.ch}' at Line ${top.line})`});
+          }
+        }
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const top = stack.pop();
+    const closeChar = { '(': ')', '{': '}', '[': ']' }[top.ch];
+    errors.push({type: "unclosed", msg: `Unclosed '${top.ch}' opened at Line ${top.line}, Col ${top.col} (missing '${closeChar}')`});
+  }
+
+  return errors;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EARLEY PARSER IMPLEMENTATION
+═══════════════════════════════════════════════════════════════════════════ */
+function stateKey(s) { return `${s.lhs}|${s.rhs.join(",")}~${s.dot}|${s.origin}`; }
+function nextSym(s)  { return s.dot < s.rhs.length ? s.rhs[s.dot] : null; }
+function advance(s)  { return {lhs:s.lhs, rhs:s.rhs, dot:s.dot+1, origin:s.origin}; }
+function isComplete(s) { return s.dot >= s.rhs.length; }
+
+function earleyParseWithAnalysis(terminals, tokens) {
+  const n = terminals.length;
+  const chart = Array.from({length: n + 1}, () => new Map());
+
+  // Seed start symbol
+  for (const rhs of prodsFor(START)) {
+    const s = {lhs: START, rhs, dot: 0, origin: 0};
+    chart[0].set(stateKey(s), s);
+  }
+
+  function expandCol(colIdx) {
+    const queue = Array.from(chart[colIdx].values());
+    let head = 0;
+    while (head < queue.length) {
+      const st = queue[head++];
+      const sym = nextSym(st);
+      if (sym === null) {
+        // COMPLETION
+        for (const caller of chart[st.origin].values()) {
+          if (nextSym(caller) === st.lhs) {
+            const ns = advance(caller);
+            const k = stateKey(ns);
+            if (!chart[colIdx].has(k)) {
+              chart[colIdx].set(k, ns);
+              queue.push(ns);
+            }
+          }
+        }
+      } else if (isNT(sym)) {
+        // PREDICTION
+        for (const rhs of prodsFor(sym)) {
+          const ns = {lhs: sym, rhs, dot: 0, origin: colIdx};
+          const k = stateKey(ns);
+          if (!chart[colIdx].has(k)) {
+            chart[colIdx].set(k, ns);
+            queue.push(ns);
+          }
+        }
+      }
+    }
+  }
+
+  expandCol(0);
+
+  let consumed = 0;
+  let syntaxError = null;
+  let recovered = false;
+
+  for (let i = 0; i < n; i++) {
+    const tok = terminals[i];
+    let scanned = false;
+    for (const st of chart[i].values()) {
+      if (nextSym(st) === tok) {
+        const ns = advance(st);
+        chart[i + 1].set(stateKey(ns), ns);
+        scanned = true;
+      }
+    }
+
+    if (scanned) {
+      expandCol(i + 1);
+      consumed++;
+    } else {
+      // Error: token cannot be consumed
+      const expected = new Set();
+      for (const st of chart[i].values()) {
+        const ns = nextSym(st);
+        if (ns && !isNT(ns)) expected.add(ns);
+      }
+      const tokObj = tokens && i < tokens.length ? tokens[i] : null;
+      syntaxError = {
+        token: tok,
+        raw: tokObj ? tokObj.raw : tok,
+        line: tokObj ? tokObj.line : 1,
+        col: tokObj ? tokObj.col : 1,
+        expected: Array.from(expected)
+      };
+
+      // Panic recovery: skip ahead to next ';' or '}'
+      for (let j = i + 1; j < n; j++) {
+        if (terminals[j] === ";" || terminals[j] === "}") {
+          recovered = true;
+          for (const rhs of prodsFor("STMT")) {
+            const ns = {lhs:"STMT", rhs, dot:0, origin: j + 1};
+            chart[j + 1].set(stateKey(ns), ns);
+          }
+          expandCol(j + 1);
+          consumed = j + 1;
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  const lastColStates = Array.from(chart[consumed].values());
+  const expectedTerminals = new Set();
+  for (const st of lastColStates) {
+    const sym = nextSym(st);
+    if (sym && !isNT(sym)) expectedTerminals.add(sym);
+  }
+
+  const isAccepted = consumed === n && Array.from(chart[n].values()).some(
+    s => s.lhs === START && isComplete(s) && s.origin === 0
+  );
+
+  return {
+    chart,
+    consumed,
+    validPrefix: consumed === n,
+    isAccepted,
+    syntaxError,
+    recovered,
+    expectedTerminals: Array.from(expectedTerminals)
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CATEGORIZATION & AUTOCOMPLETE RANKING
+═══════════════════════════════════════════════════════════════════════════ */
+const CAT_TYPE = "type", CAT_KEYWORD = "keyword", CAT_ID = "identifier",
+      CAT_LIT = "literal", CAT_OP = "operator", CAT_DELIM = "delimiter", CAT_OTHER = "other";
+
+const LITERAL_SET = new Set(["NUM", "STR", "CHAR", "NULL"]);
+const DELIM_SET   = new Set(["(", ")", "{", "}", "[", "]", ";", ",", ":"]);
+
+function categorise(sym) {
+  if (C_TYPES.has(sym)) return CAT_TYPE;
+  if (C_CONTROLS.has(sym) || C_OTHERS.has(sym)) return CAT_KEYWORD;
+  if (LITERAL_SET.has(sym)) return CAT_LIT;
+  if (DELIM_SET.has(sym)) return CAT_DELIM;
+  if (sym === "ID") return CAT_ID;
+  if (["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "!", "&", "|", "^", "~", "++", "--", "=", "+=", "-=", "*=", "/=", "%=", "->", "."].includes(sym)) {
+    return CAT_OP;
+  }
+  return CAT_OTHER;
+}
+
+function suggest(text, cursor = null) {
+  const t0 = performance.now();
+  if (cursor === null || cursor > text.length) cursor = text.length;
+
+  const textAtCursor = text.slice(0, cursor);
+  const [completed, partial] = splitPrefix(textAtCursor);
+
+  const symbols = extractSymbols(text);
+  const tokens = tokenize(completed);
+  const terminals = tokens.map(t => t.symbol);
+
+  // Context flags
+  const openBraces = (textAtCursor.match(/\{/g) || []).length - (textAtCursor.match(/\}/g) || []).length;
+  const openParens = (textAtCursor.match(/\(/g) || []).length - (textAtCursor.match(/\)/g) || []).length;
+  const inFunctionBody = openBraces > 0;
+
+  const lastTok = tokens.length ? tokens[tokens.length - 1].symbol : null;
+  const prevTok = tokens.length >= 2 ? tokens[tokens.length - 2].symbol : null;
+
+  const isAfterType = C_TYPES.has(lastTok);
+  const isInCondition = openParens > 0 && (["if", "while", "for"].includes(lastTok) || ["if", "while", "for"].includes(prevTok));
+  const isAfterAssign = ["=", "+=", "-=", "*=", "/="].includes(lastTok);
+  const isAfterReturn = lastTok === "return";
+
+  // Earley parsing
+  const analysis = earleyParseWithAnalysis(terminals, tokens);
+  const rawExpected = analysis.expectedTerminals;
+  const delimErrors = checkDelimiterBalance(textAtCursor);
+
+  const candidates = [];
+  const seen = new Set();
+
+  function addCand(sym, display, origin, score) {
+    if (seen.has(display)) return;
+    seen.add(display);
+    const cat = categorise(KEYWORDS.has(sym) || DELIM_SET.has(sym) || LITERAL_SET.has(sym) ? sym : display);
+    candidates.push({ symbol: sym, display, category: cat, origin, score });
+  }
+
+  for (const sym of rawExpected) {
+    if (sym === "ID") {
+      if (isAfterType) {
+        if (!symbols.functions.includes("main")) addCand("ID", "main", "Grammar", 160);
+        symbols.variables.forEach(v => addCand("ID", v, "Scope", 120));
+        addCand("ID", "ID", "Grammar", 80);
+      } else if (isInCondition || isAfterAssign || isAfterReturn) {
+        symbols.params.forEach(p => addCand("ID", p, "Parameter", 160));
+        symbols.variables.forEach(v => addCand("ID", v, "Scope", 155));
+        symbols.functions.forEach(f => addCand("ID", f, "Function", 130));
+        C_STDLIB.slice(0, 5).forEach(std => addCand("ID", std, "StdLib", 125));
+        addCand("ID", "ID", "Grammar", 80);
+      } else {
+        symbols.variables.forEach(v => addCand("ID", v, "Scope", 145));
+        symbols.params.forEach(p => addCand("ID", p, "Parameter", 140));
+        C_STDLIB.slice(0, 5).forEach(std => addCand("ID", std, "StdLib", 135));
+        symbols.functions.forEach(f => addCand("ID", f, "Function", 130));
+        addCand("ID", "ID", "Grammar", 80);
+      }
+    } else if (sym === "BASIC_TYPE" || C_TYPES.has(sym)) {
+      let score = (inFunctionBody || !tokens.length || [";", "}", "{"].includes(lastTok)) ? 155 : 125;
+      if (sym === "int") score += 3;
+      addCand(sym, sym, "Grammar", score);
+    } else if (C_CONTROLS.has(sym)) {
+      let score = inFunctionBody ? 150 : 110;
+      if (["return", "if", "for", "while"].includes(sym)) score += 2;
+      addCand(sym, sym, "Grammar", score);
+    } else if (DELIM_SET.has(sym)) {
+      let score = 100;
+      if (sym === ")" && openParens > 0) score = 155;
+      else if (sym === "}" && openBraces > 0) score = 145;
+      else if (sym === "{" && lastTok === ")") score = 165;
+      else if (sym === "{" && lastTok === "{") score = 80;
+      else if (sym === ";") score = (!tokens.length || ["{", ";", "}"].includes(lastTok)) ? 105 : 140;
+      addCand(sym, sym, "Grammar", score);
+    } else if (LITERAL_SET.has(sym)) {
+      let score = (isInCondition || isAfterAssign || isAfterReturn) ? 145 : 100;
+      addCand(sym, sym, "Grammar", score);
+    } else if (["!", "-", "+", "~", "*", "&", "++", "--", "sizeof"].includes(sym)) {
+      let score = (isInCondition || isAfterAssign || isAfterReturn) ? 140 : 100;
+      addCand(sym, sym, "Grammar", score);
+    } else {
+      addCand(sym, sym, "Grammar", 100);
+    }
+  }
+
+  // Prefix matching & filtering
+  let suggestions = [];
+  if (partial) {
+    const pl = partial.toLowerCase();
+    for (const c of candidates) {
+      if (c.display.toLowerCase().startsWith(pl)) {
+        const copy = Object.assign({}, c);
+        if (c.display.startsWith(partial)) copy.score += 60;
+        else copy.score += 40;
+        if (c.display.toLowerCase() === pl) copy.score += 80;
+        suggestions.push(copy);
+      }
+    }
+    if (!suggestions.length) {
+      const allKws = new Set([...KEYWORDS, ...C_STDLIB, ...symbols.variables]);
+      for (const kw of allKws) {
+        if (kw.toLowerCase().startsWith(pl)) {
+          addCand(kw, kw, "PrefixMatch", 85);
+        }
+      }
+      suggestions = candidates.filter(c => c.display.toLowerCase().startsWith(pl));
+    }
+  } else {
+    suggestions = candidates;
+  }
+
+  suggestions.sort((a,b) => b.score - a.score || a.display.localeCompare(b.display));
+
+  // Overall status evaluation
+  let status = "Incomplete";
+  let statusMsg = "Parser has live states — statement in progress";
+
+  if (analysis.isAccepted) {
+    status = "Valid";
+    statusMsg = "Valid complete C program";
+  } else if (analysis.recovered) {
+    status = "Recovered";
+    statusMsg = "Syntax error recovered at statement boundary";
+  } else if (analysis.syntaxError) {
+    status = "Syntax Error";
+    statusMsg = `Syntax Error: unexpected '${analysis.syntaxError.raw}' at Line ${analysis.syntaxError.line}, Col ${analysis.syntaxError.col}`;
+  } else if (delimErrors.length > 0) {
+    const isOnlyUnclosed = delimErrors.every(e => e.type === "unclosed");
+    status = isOnlyUnclosed ? "Incomplete" : "Syntax Error";
+    statusMsg = delimErrors[0].msg;
+  }
+
+  const chartSummary = analysis.chart.map((col, i) => ({
+    column: i,
+    count: col.size,
+    states: Array.from(col.values())
+  }));
+
+  const totalStates = analysis.chart.reduce((acc, c) => acc + c.size, 0);
+
+  return {
+    status,
+    statusMsg,
+    validPrefix: analysis.validPrefix,
+    isAccepted: analysis.isAccepted,
+    suggestions,
+    tokens,
+    terminals,
+    partial,
+    chartSummary,
+    totalStates,
+    errors: analysis.syntaxError ? [analysis.syntaxError] : delimErrors,
+    parseTimeMs: (performance.now() - t0).toFixed(2)
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UI CONTROLS & EVENT BINDINGS
+═══════════════════════════════════════════════════════════════════════════ */
+const codeInput    = document.getElementById("codeInput");
+const statusDot    = document.getElementById("statusDot");
+const statusText   = document.getElementById("statusText");
+const statTokens   = document.getElementById("statTokens");
+const statStates   = document.getElementById("statStates");
+const statTime     = document.getElementById("statTime");
+const statLine     = document.getElementById("statLine");
+const statCol      = document.getElementById("statCol");
+const diagAlert    = document.getElementById("diagAlert");
+const chipsRow     = document.getElementById("chipsRow");
+const tokenStream  = document.getElementById("tokenStream");
+const chartColumns = document.getElementById("chartColumns");
+const stateList    = document.getElementById("stateList");
+const acDropdown   = document.getElementById("acDropdown");
+const clearBtn     = document.getElementById("clearBtn");
+const grammarSearch= document.getElementById("grammarSearch");
+const grammarRules = document.getElementById("grammarRules");
+
+let selectedAcIdx = -1;
+let currentSuggestions = [];
+
+// ── KEYBOARD NAVIGATION IN DROPDOWN ───────────────────────────────────────
+codeInput.addEventListener("keydown", e => {
+  if (acDropdown.classList.contains("open")) {
+    const items = acDropdown.querySelectorAll(".ac-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      selectedAcIdx = Math.min(selectedAcIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle("active", i === selectedAcIdx));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      selectedAcIdx = Math.max(selectedAcIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle("active", i === selectedAcIdx));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      if (selectedAcIdx >= 0 && selectedAcIdx < currentSuggestions.length) {
+        applyCompletion(currentSuggestions[selectedAcIdx].display);
+      } else if (currentSuggestions.length > 0) {
+        applyCompletion(currentSuggestions[0].display);
+      }
+      closeDropdown();
+    } else if (e.key === "Escape") {
+      closeDropdown();
+    }
+  }
+});
+
+function applyCompletion(display) {
+  const text = codeInput.value;
+  const cursor = codeInput.selectionStart;
+  const textBefore = text.slice(0, cursor);
+  const textAfter = text.slice(cursor);
+
+  const [completed, partial] = splitPrefix(textBefore);
+  const insertion = display + (display === "(" || display === "{" || display === "[" ? "" : " ");
+  codeInput.value = completed + insertion + textAfter;
+
+  const newPos = completed.length + insertion.length;
+  codeInput.setSelectionRange(newPos, newPos);
+  codeInput.focus();
+  render();
+}
+
+function closeDropdown() {
+  acDropdown.classList.remove("open");
+  selectedAcIdx = -1;
+}
+
+// ── RENDER PIPELINE ───────────────────────────────────────────────────────
+function render() {
+  const text = codeInput.value;
+  const cursor = codeInput.selectionStart;
+
+  // Calculate line & col at cursor
+  const linesBefore = text.slice(0, cursor).split("\n");
+  statLine.textContent = linesBefore.length;
+  statCol.textContent = linesBefore[linesBefore.length - 1].length + 1;
+
+  const res = suggest(text, cursor);
+  currentSuggestions = res.suggestions;
+
+  // --- Status dot & pill ---
+  const clsMap = { "Valid": "valid", "Incomplete": "incomplete", "Recovered": "recovered", "Syntax Error": "invalid" };
+  const stCls = clsMap[res.status] || "incomplete";
+
+  statusDot.className = `status-dot ${stCls}`;
+  statusText.className = `status-text ${stCls}`;
+  statusText.textContent = res.statusMsg;
+
+  statTokens.textContent = res.tokens.length;
+  statStates.textContent = res.totalStates;
+  statTime.textContent = res.parseTimeMs + " ms";
+
+  // --- Diagnostics Alert ---
+  if (res.status === "Syntax Error" || res.status === "Recovered") {
+    diagAlert.className = `diag-alert visible ${res.status === "Syntax Error" ? "err" : "warn"}`;
+    diagAlert.innerHTML = `<strong>${res.status}:</strong> ${escHtml(res.statusMsg)}`;
+  } else {
+    diagAlert.className = "diag-alert";
+  }
+
+  // --- Chips row ---
+  chipsRow.innerHTML = "";
+  if (!res.suggestions.length) {
+    chipsRow.innerHTML = `<span class="empty-msg">${res.validPrefix ? "(statement complete)" : "(no grammar continuation)"}</span>`;
+  } else {
+    for (const s of res.suggestions.slice(0, 16)) {
+      const chip = document.createElement("span");
+      chip.className = `chip ${s.category}`;
+      chip.textContent = s.display;
+      chip.title = `Origin: ${s.origin || 'Grammar'} · Category: ${s.category}`;
+      chip.addEventListener("click", () => { applyCompletion(s.display); closeDropdown(); });
+      chipsRow.appendChild(chip);
+    }
+  }
+
+  // --- Dropdown ---
+  if (res.partial && res.suggestions.length > 0) {
+    acDropdown.innerHTML = "";
+    const iconMap = { type:"TYPE", keyword:"KW", operator:"OP", identifier:"ID", literal:"LIT", delimiter:"SYM", other:"??" };
+    for (let i = 0; i < Math.min(res.suggestions.length, 12); i++) {
+      const s = res.suggestions[i];
+      const item = document.createElement("div");
+      item.className = "ac-item";
+      const highlighted = s.display.toLowerCase().startsWith(res.partial.toLowerCase())
+        ? `<span class="ac-match">${escHtml(s.display.slice(0, res.partial.length))}</span>${escHtml(s.display.slice(res.partial.length))}`
+        : escHtml(s.display);
+
+      item.innerHTML = `
+        <div class="ac-icon ${s.category}">${iconMap[s.category] || "ID"}</div>
+        <span class="ac-text">${highlighted}</span>
+        <span class="ac-origin">${s.origin || 'Grammar'}</span>
+        <span class="ac-cat">${s.category}</span>`;
+      item.addEventListener("click", () => { applyCompletion(s.display); closeDropdown(); });
+      acDropdown.appendChild(item);
+    }
+    acDropdown.classList.add("open");
+    selectedAcIdx = -1;
+  } else {
+    closeDropdown();
+  }
+
+  // --- Token stream ---
+  tokenStream.innerHTML = "";
+  if (!res.tokens.length) {
+    tokenStream.innerHTML = `<span class="empty-msg">No tokens yet</span>`;
+  }
+  for (const t of res.tokens) {
+    const el = document.createElement("div");
+    let cls = "t-op";
+    if (C_TYPES.has(t.symbol)) cls = "t-type";
+    else if (C_CONTROLS.has(t.symbol)) cls = "t-keyword";
+    else if (t.symbol === "ID") cls = "t-id";
+    else if (t.symbol === "NUM") cls = "t-num";
+    else if (t.symbol === "STR") cls = "t-str";
+    else if (t.symbol === "CHAR") cls = "t-char";
+    else if (DELIM_SET.has(t.symbol)) cls = "t-delim";
+
+    el.className = `tok ${cls}`;
+    el.innerHTML = `<span class="tok-raw">${escHtml(t.raw)}</span><span class="tok-type">${t.symbol !== t.raw ? t.symbol : "·"}</span>`;
+    tokenStream.appendChild(el);
+  }
+
+  // --- Chart columns ---
+  chartColumns.innerHTML = "";
+  stateList.innerHTML = "";
+
+  for (const col of res.chartSummary) {
+    const card = document.createElement("div");
+    const isLast = col.column === res.terminals.length;
+    card.className = "chart-col-card" + (isLast ? " last-col active" : "");
+    card.innerHTML = `
+      <div class="chart-col-idx">col ${col.column}</div>
+      <div class="chart-col-count">${col.count}</div>
+      <div class="chart-col-label">${isLast ? "← active" : "states"}</div>`;
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".chart-col-card").forEach(c => c.classList.remove("active"));
+      card.classList.add("active");
+      renderStateList(col.states, col.column);
+    });
+    chartColumns.appendChild(card);
+  }
+
+  // Auto-render last column states
+  if (res.chartSummary.length > 0) {
+    const lastCol = res.chartSummary[res.chartSummary.length - 1];
+    renderStateList(lastCol.states, lastCol.column);
+  }
+}
+
+function renderStateList(states, colIdx) {
+  stateList.innerHTML = "";
+  if (!states || !states.length) {
+    stateList.innerHTML = `<div class="empty-msg" style="padding:8px 0">No states in column ${colIdx}</div>`;
+    return;
+  }
+  const sorted = [...states].sort((a,b) => (isComplete(a) ? 0 : 1) - (isComplete(b) ? 0 : 1));
+  for (const s of sorted.slice(0, 80)) {
+    const complete = isComplete(s);
+    const nxt = nextSym(s);
+    const hasTerm = nxt !== null && !isNT(nxt);
+    const row = document.createElement("div");
+    row.className = `state-item${complete ? " complete" : hasTerm ? " has-terminal" : ""}`;
+
+    let rhsHtml = "";
+    for (let i = 0; i < s.rhs.length; i++) {
+      if (i === s.dot) rhsHtml += `<span class="state-cursor">•</span> `;
+      const cls = i < s.dot ? " matched" : "";
+      const clr = isNT(s.rhs[i]) ? "color:var(--blue)" : hasTerm && i === s.dot ? "color:var(--amber)" : "";
+      rhsHtml += `<span class="state-sym${cls}" style="${clr}">${escHtml(s.rhs[i])}</span> `;
+    }
+    if (s.dot === s.rhs.length) rhsHtml += `<span class="state-cursor">•</span>`;
+
+    row.innerHTML = `
+      <span class="state-lhs">${escHtml(s.lhs)}</span>
+      <span class="state-arrow">→</span>
+      ${rhsHtml}
+      ${complete ? '<span class="state-badge">complete</span>' : ""}`;
+    stateList.appendChild(row);
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ── GRAMMAR REFERENCE FILTER ──────────────────────────────────────────────
+const ruleCountBadge = document.getElementById("ruleCountBadge");
+ruleCountBadge.textContent = `${GRAMMAR_RULES.length} C rules`;
+
+function renderGrammar(filter="") {
+  grammarRules.innerHTML = "";
+  const fl = filter.toLowerCase();
+  for (const [lhs, rhs] of GRAMMAR_RULES) {
+    if (fl && !lhs.toLowerCase().includes(fl) && !rhs.join(" ").toLowerCase().includes(fl)) continue;
+    const row = document.createElement("div");
+    row.className = "rule-row";
+    const rhsHtml = rhs.map(sym => {
+      if (isNT(sym)) return `<span class="nt">${sym}</span>`;
+      if (KEYWORDS.has(sym)) return `<span class="kw">${sym}</span>`;
+      return sym;
+    }).join(" ");
+    row.innerHTML = `<span class="rule-lhs">${lhs}</span><span class="rule-arr">→</span><span class="rule-rhs">${rhsHtml}</span>`;
+    grammarRules.appendChild(row);
+  }
+}
+grammarSearch.addEventListener("input", () => renderGrammar(grammarSearch.value));
+renderGrammar();
+
+// ── C CODE QUICK EXAMPLES ─────────────────────────────────────────────────
+const EXAMPLES = [
+  { code: "int main() {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}", desc: "Main function & printf" },
+  { code: "int a = 10, b = 20;\nint sum = a + b;", desc: "Variable declarations" },
+  { code: "if ( a > b ) {\n    return a;\n} else {\n    return b;\n}", desc: "If-else conditional" },
+  { code: "for ( int i = 0 ; i < 10 ; i++ ) {\n    sum += i;\n}", desc: "For loop with declaration" },
+  { code: "while ( count > 0 ) {\n    count--;\n}", desc: "While loop statement" },
+  { code: "int add(int x, int y) {\n    return x + y;\n}", desc: "Function definition with parameters" },
+  { code: "struct Point {\n    int x;\n    int y;\n};\nstruct Point p;", desc: "Struct definition & instance" },
+  { code: "int *ptr = &val;\n*ptr = 42;", desc: "Pointer declaration & dereference" },
+  { code: "int arr[10];\narr[0] = 5;", desc: "Array declaration & index" },
+  { code: "int ma", desc: "Autocomplete: int ma -> main" }
+];
+
+const examplesGrid = document.getElementById("examplesGrid");
+for (const ex of EXAMPLES) {
+  const btn = document.createElement("button");
+  btn.className = "ex-btn";
+  btn.innerHTML = `${escHtml(ex.code.split('\n')[0])}<span>${ex.desc}</span>`;
+  btn.type = "button";
+  btn.addEventListener("click", () => {
+    codeInput.value = ex.code;
+    render();
+    codeInput.focus();
+    codeInput.setSelectionRange(ex.code.length, ex.code.length);
+  });
+  examplesGrid.appendChild(btn);
+}
+
+// ── CLEAR & GLOBAL LISTENERS ──────────────────────────────────────────────
+clearBtn.addEventListener("click", () => {
+  codeInput.value = "";
+  render();
+  codeInput.focus();
+});
+
+document.addEventListener("click", e => {
+  if (!e.target.closest(".editor-inner")) closeDropdown();
+});
+
+codeInput.addEventListener("input", render);
+codeInput.addEventListener("click", render);
+codeInput.addEventListener("keyup", e => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") render();
+});
+
+// Initial render
+render();
+</script>
+</body>
+</html>
